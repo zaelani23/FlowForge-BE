@@ -17,10 +17,41 @@ func InitScheduler() {
 	CronScheduler = cron.New()
 	CronScheduler.Start()
 	log.Println("Cron scheduler started")
+
+	// Load active schedules from DB
+	var schedules []models.ScheduledWorkflowExecution
+	database.DB.Where("status = ?", "ACTIVE").Find(&schedules)
+
+	for _, s := range schedules {
+		// Fetch the active version of the workflow
+		var workflow models.Workflow
+		if err := database.DB.Where("id = ?", s.WorkflowID).First(&workflow).Error; err != nil {
+			continue
+		}
+
+		var version models.WorkflowVersion
+		if err := database.DB.Where("workflow_id = ? AND version = ?", workflow.ID, workflow.CurrentVersion).First(&version).Error; err != nil {
+			continue
+		}
+
+		err := ScheduleWorkflow(s.ID, s.CronExpr, s.TenantID, s.WorkflowID, version)
+		if err != nil {
+			log.Printf("Failed to load schedule %s: %v", s.ID, err)
+		}
+	}
 }
 
-func ScheduleWorkflow(cronExpr string, tenantID string, workflowID string, version models.WorkflowVersion) error {
+// ScheduleWorkflow adds to cron engine and checks DB for status
+func ScheduleWorkflow(scheduleID string, cronExpr string, tenantID string, workflowID string, version models.WorkflowVersion) error {
 	err := CronScheduler.AddFunc(cronExpr, func() {
+		// Check if schedule is still ACTIVE in DB
+		var currentSchedule models.ScheduledWorkflowExecution
+		if err := database.DB.Where("id = ?", scheduleID).First(&currentSchedule).Error; err != nil {
+			return // Schedule not found
+		}
+		if currentSchedule.Status != "ACTIVE" {
+			return // Ignore execution
+		}
 		// Create run
 		run := models.WorkflowRun{
 			TenantID:   tenantID,

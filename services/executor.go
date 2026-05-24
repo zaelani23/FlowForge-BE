@@ -76,6 +76,15 @@ func finishRun(run models.WorkflowRun, status string, errMsg string) {
 	if errMsg != "" {
 		log.Printf("Workflow %s finished with error: %s", run.ID, errMsg)
 	}
+
+	PublishEvent("run."+run.ID, map[string]interface{}{
+		"type":        "workflow_status",
+		"run_id":      run.ID,
+		"status":      status,
+		"started_at":  run.StartedAt,
+		"finished_at": run.FinishedAt,
+		"duration_ms": run.DurationMs,
+	})
 }
 
 func executeStepWithRetry(ctx context.Context, runID string, step models.WorkflowStep) error {
@@ -96,6 +105,12 @@ func executeStepWithRetry(ctx context.Context, runID string, step models.Workflo
 				Status:   "PENDING",
 			}
 			database.DB.Create(&execLog)
+
+			PublishEvent("run."+runID, map[string]interface{}{
+				"type":    "step_status",
+				"step_id": execLog.StepID,
+				"status":  execLog.Status,
+			})
 
 			// Execute step
 			start := time.Now()
@@ -123,6 +138,15 @@ func executeStepWithRetry(ctx context.Context, runID string, step models.Workflo
 				"output_data":   &outStr,
 				"error_message": errStr,
 				"durations":     dr,
+			})
+
+			// Publish the updated execLog state
+			PublishEvent("run."+runID, map[string]interface{}{
+				"type":          "step_status",
+				"step_id":       execLog.StepID,
+				"status":        status,
+				"duration":      dr,
+				"error_message": errStr,
 			})
 
 			if err == nil {

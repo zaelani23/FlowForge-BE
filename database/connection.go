@@ -33,6 +33,7 @@ func Connect() {
 		&models.WorkflowVersion{},
 		&models.WorkflowRun{},
 		&models.ExecutionLog{},
+		&models.ScheduledWorkflowExecution{},
 	).Error
 
 	if err != nil {

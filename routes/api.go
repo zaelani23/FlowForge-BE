@@ -49,6 +49,18 @@ func SetupRouter() *gin.Engine {
 				// Workflow Runs
 				workflows.GET("/:id/runs", controllers.ListWorkflowRuns)
 				workflows.GET("/:id/runs/:run_id", controllers.GetWorkflowRun)
+				workflows.GET("/:id/runs/:run_id/ws", controllers.GetWorkflowRunWebSocket)
+
+				// Schedules
+				workflows.POST("/:id/schedule", controllers.ScheduleWorkflowAPI)
+			}
+
+			// Global Schedules API
+			schedules := protected.Group("/schedules")
+			schedules.Use(middlewares.RoleMiddleware("ADMIN", "EDITOR"))
+			{
+				schedules.GET("", controllers.ListScheduledWorkflows)
+				schedules.PUT("/:schedule_id/cancel", controllers.CancelScheduledWorkflow)
 			}
 		}
 	}

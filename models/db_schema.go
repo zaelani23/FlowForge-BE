@@ -67,3 +67,13 @@ type ExecutionLog struct {
 	ExecutedAt   time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"executed_at"`
 	Durations    *int      `json:"durations"`
 }
+
+// ScheduledWorkflowExecution represents the scheduled_workflow_execution table
+type ScheduledWorkflowExecution struct {
+	ID         string    `gorm:"type:uuid;default:gen_random_uuid();primary_key" json:"id"`
+	TenantID   string    `gorm:"type:uuid;not null" json:"tenant_id"`
+	CronExpr   string    `gorm:"type:varchar(255);not null" json:"cron_expression"`
+	WorkflowID string    `gorm:"type:uuid;not null" json:"workflow_id"`
+	Status     string    `gorm:"type:varchar(50);not null;default:'ACTIVE'" json:"status"` // 'ACTIVE', 'INACTIVE'
+	CreatedAt  time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"created_at"`
+}

@@ -19,6 +19,9 @@ func main() {
 	// Initialize database connection
 	database.Connect()
 
+	// Initialize RabbitMQ connection
+	services.InitRabbitMQ()
+
 	// Initialize cron scheduler
 	services.InitScheduler()
 
