@@ -109,3 +109,158 @@ func TriggerWorkflow(c *gin.Context) {
 		"run_id":  run.ID,
 	})
 }
+
+func UpdateWorkflow(c *gin.Context) {
+	tenantID, _ := c.Get("tenant_id")
+	workflowID := c.Param("id")
+
+	var req struct {
+		Name        string                    `json:"name"`
+		Description string                    `json:"description"`
+		Definition  models.WorkflowDefinition `json:"definition" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate new DAG
+	if _, err := services.TopoSort(req.Definition); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid DAG: " + err.Error()})
+		return
+	}
+
+	tx := database.DB.Begin()
+
+	var workflow models.Workflow
+	if err := tx.Where("id = ? AND tenant_id = ?", workflowID, tenantID).First(&workflow).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	// Increment version
+	newVersionNumber := workflow.CurrentVersion + 1
+
+	// Save new version
+	defJSON, _ := json.Marshal(req.Definition)
+	newVersion := models.WorkflowVersion{
+		WorkflowID: workflow.ID,
+		Version:    newVersionNumber,
+		Definition: string(defJSON),
+	}
+
+	if err := tx.Create(&newVersion).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create new workflow version"})
+		return
+	}
+
+	// Update workflow metadata
+	if req.Name != "" {
+		workflow.Name = req.Name
+	}
+	if req.Description != "" {
+		workflow.Description = req.Description
+	}
+	workflow.CurrentVersion = newVersionNumber
+
+	if err := tx.Save(&workflow).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update workflow"})
+		return
+	}
+
+	tx.Commit()
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "Workflow updated successfully",
+		"workflow": workflow,
+	})
+}
+
+func ListVersions(c *gin.Context) {
+	tenantID, _ := c.Get("tenant_id")
+	workflowID := c.Param("id")
+
+	// Ensure workflow belongs to tenant
+	var workflow models.Workflow
+	if err := database.DB.Where("id = ? AND tenant_id = ?", workflowID, tenantID).First(&workflow).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	var versions []models.WorkflowVersion
+	database.DB.Where("workflow_id = ?", workflowID).Order("version desc").Find(&versions)
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": versions,
+	})
+}
+
+func SetActiveVersion(c *gin.Context) {
+	tenantID, _ := c.Get("tenant_id")
+	workflowID := c.Param("id")
+	versionStr := c.Param("version")
+	versionNum, err := strconv.Atoi(versionStr)
+
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid version number"})
+		return
+	}
+
+	tx := database.DB.Begin()
+
+	// Check workflow ownership
+	var workflow models.Workflow
+	if err := tx.Where("id = ? AND tenant_id = ?", workflowID, tenantID).First(&workflow).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	// Check if version exists
+	var version models.WorkflowVersion
+	if err := tx.Where("workflow_id = ? AND version = ?", workflowID, versionNum).First(&version).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow version not found"})
+		return
+	}
+
+	workflow.CurrentVersion = versionNum
+	if err := tx.Save(&workflow).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set active version"})
+		return
+	}
+
+	tx.Commit()
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Active version updated",
+		"current_version": versionNum,
+	})
+}
+
+func DeleteWorkflow(c *gin.Context) {
+	tenantID, _ := c.Get("tenant_id")
+	workflowID := c.Param("id")
+
+	// Ensure workflow belongs to tenant
+	var workflow models.Workflow
+	if err := database.DB.Where("id = ? AND tenant_id = ?", workflowID, tenantID).First(&workflow).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	// Due to ON DELETE CASCADE on the foreign keys, deleting workflow will delete its versions and runs
+	if err := database.DB.Delete(&workflow).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete workflow"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Workflow deleted successfully",
+	})
+}
