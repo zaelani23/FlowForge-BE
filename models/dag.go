@@ -12,10 +12,11 @@ const (
 
 // WorkflowStep structure based on user feedback
 type WorkflowStep struct {
-	ID        string            `json:"id"`
-	Type      StepType          `json:"type"`
-	Config    map[string]string `json:"config"`
-	DependsOn []string          `json:"depends_on"`
+	ID          string            `json:"id"`
+	Description string            `json:"description"`
+	Type        StepType          `json:"type"`
+	Config      map[string]string `json:"config"`
+	DependsOn   []string          `json:"depends_on"`
 }
 
 // WorkflowDefinition structure

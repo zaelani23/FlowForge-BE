@@ -6,9 +6,16 @@ import (
 	"workflow-engine/database"
 	"workflow-engine/routes"
 	"workflow-engine/services"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found or failed to load, proceeding with environment variables")
+	}
+
 	// Initialize database connection
 	database.Connect()
 

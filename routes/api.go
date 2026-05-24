@@ -40,10 +40,14 @@ func SetupRouter() *gin.Engine {
 				workflows.PUT("/:id", controllers.UpdateWorkflow)
 				workflows.DELETE("/:id", controllers.DeleteWorkflow)
 				workflows.POST("/:id/trigger", controllers.TriggerWorkflow)
-				
+
 				// Workflow Versions
 				workflows.GET("/:id/versions", controllers.ListVersions)
 				workflows.PUT("/:id/versions/:version/active", controllers.SetActiveVersion)
+
+				// Workflow Runs
+				workflows.GET("/:id/runs", controllers.ListWorkflowRuns)
+				workflows.GET("/:id/runs/:run_id", controllers.GetWorkflowRun)
 			}
 		}
 	}

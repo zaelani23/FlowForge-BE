@@ -5,6 +5,7 @@ import (
 
 	"workflow-engine/database"
 	"workflow-engine/models"
+	"workflow-engine/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,11 +36,19 @@ func RegisterTenant(c *gin.Context) {
 		return
 	}
 
+	// Hash password
+	hashedPassword, err := utils.HashPassword(req.AdminPass)
+	if err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		return
+	}
+
 	// Create Admin User for this Tenant
 	user := models.User{
 		TenantID:     tenant.ID,
 		Email:        req.AdminEmail,
-		PasswordHash: req.AdminPass, // In production, hash this!
+		PasswordHash: hashedPassword,
 		Role:         "ADMIN",
 	}
 
@@ -90,10 +99,16 @@ func RegisterUser(c *gin.Context) {
 		return
 	}
 
+	hashedPassword, err := utils.HashPassword(req.Password)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		return
+	}
+
 	user := models.User{
 		TenantID:     tenantID.(string),
 		Email:        req.Email,
-		PasswordHash: req.Password, // In production, hash this!
+		PasswordHash: hashedPassword,
 		Role:         req.Role,
 	}
 

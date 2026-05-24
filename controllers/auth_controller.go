@@ -7,6 +7,7 @@ import (
 	"workflow-engine/database"
 	"workflow-engine/middlewares"
 	"workflow-engine/models"
+	"workflow-engine/utils"
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
@@ -30,8 +31,9 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	// For demo, checking plain text. In production, use bcrypt.CompareHashAndPassword
-	if req.Password != user.PasswordHash {
+	// Verify password using Argon2id
+	match, err := utils.CheckPasswordHash(req.Password, user.PasswordHash)
+	if err != nil || !match {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
@@ -44,7 +46,7 @@ func Login(c *gin.Context) {
 		"exp":       time.Now().Add(time.Hour * 72).Unix(),
 	})
 
-	tokenString, err := token.SignedString(middlewares.JwtSecret)
+	tokenString, err := token.SignedString(middlewares.GetJwtSecret())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return

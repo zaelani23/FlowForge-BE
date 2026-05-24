@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/postgres"
@@ -12,9 +13,10 @@ import (
 var DB *gorm.DB
 
 func Connect() {
-	// DSN format: "host=localhost user=postgres password=postgres dbname=workflow_engine port=5432 sslmode=disable TimeZone=Asia/Jakarta"
-	// Hardcoded for demo, normally from env vars
-	dsn := "host=aws-1-ap-northeast-1.pooler.supabase.com user=postgres.hcxckinompkckxsmjhuh password=ibZhIdcqghVKf2iR dbname=postgres port=5432 sslmode=disable TimeZone=UTC"
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		log.Fatal("DATABASE_URL environment variable not set")
+	}
 
 	db, err := gorm.Open("postgres", dsn)
 	if err != nil {

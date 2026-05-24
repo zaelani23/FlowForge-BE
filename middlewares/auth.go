@@ -3,13 +3,20 @@ package middlewares
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
 )
 
-var JwtSecret = []byte("super-secret-key-change-me")
+func GetJwtSecret() []byte {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		return []byte("super-secret-key-change-me") // fallback
+	}
+	return []byte(secret)
+}
 
 // AuthMiddleware validates the JWT token
 func AuthMiddleware() gin.HandlerFunc {
@@ -33,7 +40,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
-			return JwtSecret, nil
+			return GetJwtSecret(), nil
 		})
 
 		if err != nil || !token.Valid {

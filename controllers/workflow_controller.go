@@ -264,3 +264,58 @@ func DeleteWorkflow(c *gin.Context) {
 		"message": "Workflow deleted successfully",
 	})
 }
+
+func GetWorkflowRun(c *gin.Context) {
+	tenantID, _ := c.Get("tenant_id")
+	runID := c.Param("run_id")
+
+	var run models.WorkflowRun
+	if err := database.DB.Where("id = ? AND tenant_id = ?", runID, tenantID).First(&run).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow run not found"})
+		return
+	}
+
+	var workflow models.Workflow
+	if err := database.DB.Where("id = ?", run.WorkflowID).First(&workflow).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	var version models.WorkflowVersion
+	if err := database.DB.Where("id = ?", run.VersionID).First(&version).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Workflow version not found"})
+		return
+	}
+
+	var def models.WorkflowDefinition
+	json.Unmarshal([]byte(version.Definition), &def)
+
+	c.JSON(http.StatusOK, gin.H{
+		"run_id":      run.ID,
+		"status":      run.Status,
+		"started_at":  run.StartedAt,
+		"finished_at": run.FinishedAt,
+		"duration_ms": run.DurationMs,
+		"workflow":    workflow,
+		"definition":  def,
+	})
+}
+
+func ListWorkflowRuns(c *gin.Context) {
+	tenantID, _ := c.Get("tenant_id")
+	workflowID := c.Param("id")
+
+	// Ensure workflow belongs to tenant
+	var workflow models.Workflow
+	if err := database.DB.Where("id = ? AND tenant_id = ?", workflowID, tenantID).First(&workflow).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	var runs []models.WorkflowRun
+	database.DB.Where("workflow_id = ?", workflowID).Order("started_at desc").Find(&runs)
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": runs,
+	})
+}
