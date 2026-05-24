@@ -37,6 +37,7 @@ func SetupRouter() *gin.Engine {
 			{
 				workflows.POST("", controllers.CreateWorkflow)
 				workflows.GET("", controllers.ListWorkflows)
+				workflows.GET("/:id", controllers.GetWorkflow)
 				workflows.PUT("/:id", controllers.UpdateWorkflow)
 				workflows.DELETE("/:id", controllers.DeleteWorkflow)
 				workflows.POST("/:id/trigger", controllers.TriggerWorkflow)

@@ -194,8 +194,21 @@ func ListVersions(c *gin.Context) {
 	var versions []models.WorkflowVersion
 	database.DB.Where("workflow_id = ?", workflowID).Order("version desc").Find(&versions)
 
+	var response []map[string]interface{}
+	for _, v := range versions {
+		var def map[string]interface{}
+		json.Unmarshal([]byte(v.Definition), &def)
+		response = append(response, map[string]interface{}{
+			"id": v.ID,
+			"workflow_id": v.WorkflowID,
+			"version": v.Version,
+			"definition": def,
+			"created_at": v.CreatedAt,
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"data": versions,
+		"data": response,
 	})
 }
 
@@ -290,6 +303,48 @@ func GetWorkflowRun(c *gin.Context) {
 	var def models.WorkflowDefinition
 	json.Unmarshal([]byte(version.Definition), &def)
 
+	var logs []models.ExecutionLog
+	database.DB.Where("run_id = ?", runID).Order("executed_at asc").Find(&logs)
+
+	logMap := make(map[string]models.ExecutionLog)
+	for _, l := range logs {
+		logMap[l.StepID] = l
+	}
+
+	var stepsWithStatus []map[string]interface{}
+	for _, step := range def.Steps {
+		stepStatus := "NOT STARTED"
+		var executedAt interface{} = nil
+		var durations *int
+		var errorMsg *string
+
+		if l, ok := logMap[step.ID]; ok {
+			stepStatus = l.Status
+			executedAt = l.ExecutedAt
+			durations = l.Durations
+			if l.Status == "FAILED" {
+				errorMsg = l.ErrorMessage
+			}
+		}
+
+		stepsWithStatus = append(stepsWithStatus, map[string]interface{}{
+			"id": step.ID,
+			"description": step.Description,
+			"type": step.Type,
+			"config": step.Config,
+			"depends_on": step.DependsOn,
+			"status": stepStatus,
+			"executed_at": executedAt,
+			"durations": durations,
+			"error_message": errorMsg,
+		})
+	}
+
+	defMap := map[string]interface{}{
+		"id": def.ID,
+		"steps": stepsWithStatus,
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"run_id":      run.ID,
 		"status":      run.Status,
@@ -297,7 +352,7 @@ func GetWorkflowRun(c *gin.Context) {
 		"finished_at": run.FinishedAt,
 		"duration_ms": run.DurationMs,
 		"workflow":    workflow,
-		"definition":  def,
+		"definition":  defMap,
 	})
 }
 
@@ -315,7 +370,48 @@ func ListWorkflowRuns(c *gin.Context) {
 	var runs []models.WorkflowRun
 	database.DB.Where("workflow_id = ?", workflowID).Order("started_at desc").Find(&runs)
 
+	var response []map[string]interface{}
+	for _, r := range runs {
+		response = append(response, map[string]interface{}{
+			"id": r.ID,
+			"tenant_id": r.TenantID,
+			"workflow_id": r.WorkflowID,
+			"workflow_name": workflow.Name,
+			"version_id": r.VersionID,
+			"status": r.Status,
+			"started_at": r.StartedAt,
+			"finished_at": r.FinishedAt,
+			"duration_ms": r.DurationMs,
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"data": runs,
+		"data": response,
+	})
+}
+
+func GetWorkflow(c *gin.Context) {
+	tenantID, _ := c.Get("tenant_id")
+	workflowID := c.Param("id")
+
+	var workflow models.Workflow
+	if err := database.DB.Where("id = ? AND tenant_id = ?", workflowID, tenantID).First(&workflow).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	var activeVersion models.WorkflowVersion
+	if err := database.DB.Where("workflow_id = ? AND version = ?", workflowID, workflow.CurrentVersion).First(&activeVersion).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Active workflow version not found"})
+		return
+	}
+
+	var def models.WorkflowDefinition
+	json.Unmarshal([]byte(activeVersion.Definition), &def)
+
+	c.JSON(http.StatusOK, gin.H{
+		"workflow": workflow,
+		"active_version": activeVersion.Version,
+		"definition": def,
 	})
 }

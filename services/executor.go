@@ -88,10 +88,21 @@ func executeStepWithRetry(ctx context.Context, runID string, step models.Workflo
 		case <-ctx.Done():
 			return fmt.Errorf("workflow timeout exceeded during step %s", step.ID)
 		default:
+			// Insert PENDING log
+			execLog := models.ExecutionLog{
+				RunID:    runID,
+				StepID:   step.ID,
+				StepType: string(step.Type),
+				Status:   "PENDING",
+			}
+			database.DB.Create(&execLog)
+
 			// Execute step
+			start := time.Now()
 			output, err := executeStepAction(step)
-			
-			// Log execution
+			duration := time.Since(start)
+
+			// Log execution update
 			status := "SUCCESS"
 			var errStr *string
 			if err != nil {
@@ -103,26 +114,24 @@ func executeStepWithRetry(ctx context.Context, runID string, step models.Workflo
 				errStr = &e
 			}
 
+			dr := int(duration.Milliseconds())
 			outBytes, _ := json.Marshal(output)
 			outStr := string(outBytes)
 
-			execLog := models.ExecutionLog{
-				RunID:        runID,
-				StepID:       step.ID,
-				StepType:     string(step.Type),
-				Status:       status,
-				OutputData:   &outStr,
-				ErrorMessage: errStr,
-			}
-			database.DB.Create(&execLog)
+			database.DB.Model(&execLog).Updates(map[string]interface{}{
+				"status":        status,
+				"output_data":   &outStr,
+				"error_message": errStr,
+				"durations":     dr,
+			})
 
 			if err == nil {
 				return nil
 			}
-			
+
 			lastErr = err
 			log.Printf("Step %s failed (attempt %d/%d): %v", step.ID, attempt, maxRetries, err)
-			
+
 			if attempt < maxRetries {
 				time.Sleep(backoff)
 				backoff *= 2 // Exponential backoff
@@ -140,12 +149,12 @@ func executeStepAction(step models.WorkflowStep) (map[string]interface{}, error)
 		if method == "" {
 			method = "GET"
 		}
-		
+
 		req, err := http.NewRequest(method, url, nil)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		client := &http.Client{Timeout: 10 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
