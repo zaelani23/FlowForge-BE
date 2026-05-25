@@ -27,6 +27,11 @@ services:
     ports:
       - "5672:5672"   # Port utama RabbitMQ
       - "15672:15672" # Port UI Management RabbitMQ
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   # 3. Flowforge Backend
   flowforge-be:
@@ -37,13 +42,15 @@ services:
       - "8080:8080"
     environment:
       # Terhubung ke service 'db' di atas
-      - DATABASE_URL=postgres://flowforge_user:flowforge_password@db:5432/flowforge_db
+      - DATABASE_URL=host=db user=flowforge_user password=flowforge_password dbname=flowforge_db port=5432 sslmode=disable TimeZone=Asia/Jakarta
       # Terhubung ke service 'rabbitmq' di atas
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
       - JWT_SECRET=supersecretjwtkey_ganti_di_production
     depends_on:
-      - db
-      - rabbitmq
+      db:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
 
   # 4. Flowforge Frontend
   flowforge-fe:

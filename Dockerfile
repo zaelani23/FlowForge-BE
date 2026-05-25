@@ -23,4 +23,6 @@ WORKDIR /app
 
 COPY --from=upx /app/engine /app
 
+RUN touch .env
+
 ENTRYPOINT ["/app/engine"]
