@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  # 1. Database PostgreSQL
+  db:
+    image: postgres:15-alpine
+    container_name: flowforge_db
+    restart: always
+    environment:
+      POSTGRES_USER: flowforge_user
+      POSTGRES_PASSWORD: flowforge_password
+      POSTGRES_DB: flowforge_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 2. RabbitMQ
+  rabbitmq:
+    # Menggunakan versi management agar mendapat UI dashboard di port 15672
+    image: rabbitmq:3-management-alpine
+    container_name: flowforge_rabbitmq
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"   # Port utama RabbitMQ
+      - "15672:15672" # Port UI Management RabbitMQ
+
+  # 3. Flowforge Backend
+  flowforge-be:
+    image: ghcr.io/zaelani23/flowforge-be:latest
+    container_name: flowforge_be
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      # Terhubung ke service 'db' di atas
+      - DATABASE_URL=postgres://flowforge_user:flowforge_password@db:5432/flowforge_db
+      # Terhubung ke service 'rabbitmq' di atas
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - JWT_SECRET=supersecretjwtkey_ganti_di_production
+    depends_on:
+      - db
+      - rabbitmq
+
+  # 4. Flowforge Frontend
+  flowforge-fe:
+    image: ghcr.io/zaelani23/flowforge-fe:latest
+    container_name: flowforge_fe
+    restart: always
+    ports:
+      - "8081:80"
+    environment:
+      # Asumsi backend diakses melalui localhost dari browser pengguna
+      - VITE_API_URL=http://localhost:8080
+      - VITE_WS_URL=ws://localhost:8080
+    depends_on:
+      - flowforge-be
+
+# Volume untuk menyimpan data database secara persisten
+volumes:
+  postgres_data:
