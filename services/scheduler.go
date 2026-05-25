@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"workflow-engine/database"
 	"workflow-engine/models"
@@ -43,6 +44,9 @@ func InitScheduler() {
 
 // ScheduleWorkflow adds to cron engine and checks DB for status
 func ScheduleWorkflow(scheduleID string, cronExpr string, tenantID string, workflowID string, version models.WorkflowVersion) error {
+	if len(strings.Fields(cronExpr)) == 5 {
+		cronExpr = "0 " + cronExpr
+	}
 	err := CronScheduler.AddFunc(cronExpr, func() {
 		// Check if schedule is still ACTIVE in DB
 		var currentSchedule models.ScheduledWorkflowExecution

@@ -486,11 +486,34 @@ func ScheduleWorkflowAPI(c *gin.Context) {
 func ListScheduledWorkflows(c *gin.Context) {
 	tenantID, _ := c.Get("tenant_id")
 
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	offset := (page - 1) * limit
+
 	var schedules []models.ScheduledWorkflowExecution
-	database.DB.Where("tenant_id = ?", tenantID).Order("created_at desc").Find(&schedules)
+	database.DB.Where("tenant_id = ?", tenantID).Order("created_at desc").Offset(offset).Limit(limit).Find(&schedules)
+
+	var response []map[string]interface{}
+	for _, s := range schedules {
+		var workflow models.Workflow
+		database.DB.Where("id = ?", s.WorkflowID).First(&workflow)
+
+		response = append(response, map[string]interface{}{
+			"id":                   s.ID,
+			"tenant_id":            s.TenantID,
+			"cron_expression":      s.CronExpr,
+			"workflow_id":          s.WorkflowID,
+			"workflow_name":        workflow.Name,
+			"workflow_description": workflow.Description,
+			"status":               s.Status,
+			"created_at":           s.CreatedAt,
+		})
+	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"data": schedules,
+		"data":  response,
+		"page":  page,
+		"limit": limit,
 	})
 }
 
