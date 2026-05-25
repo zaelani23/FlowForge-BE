@@ -134,12 +134,15 @@ type UserTenantResult struct {
 }
 
 func ListUserTenants(c *gin.Context) {
+	tenantID, _ := c.Get("tenant_id")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	offset := (page - 1) * limit
 
 	var totalCount int64
-	database.DB.Table("users").Count(&totalCount)
+	database.DB.Table("users").
+		Where("users.tenant_id = ?", tenantID).
+		Count(&totalCount)
 	totalPage := 1
 	if limit > 0 {
 		totalPage = int((totalCount + int64(limit) - 1) / int64(limit))
@@ -149,6 +152,7 @@ func ListUserTenants(c *gin.Context) {
 	database.DB.Table("users").
 		Select("users.id as user_id, users.email, users.role, tenants.id as tenant_id, tenants.name as tenant_name, users.created_at").
 		Joins("left join tenants on users.tenant_id = tenants.id").
+		Where("users.tenant_id = ?", tenantID).
 		Order("users.created_at desc").
 		Offset(offset).Limit(limit).
 		Scan(&results)
