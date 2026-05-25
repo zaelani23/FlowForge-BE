@@ -47,6 +47,7 @@ func SetupRouter() *gin.Engine {
 			{
 				users.POST("/register", controllers.RegisterUser)
 				users.GET("/tenants", controllers.ListUserTenants)
+				users.DELETE("/:id", controllers.DeleteUser)
 			}
 
 			// Workflow CRUD (Admins & Editors)
@@ -65,11 +66,17 @@ func SetupRouter() *gin.Engine {
 				workflows.PUT("/:id/versions/:version/active", controllers.SetActiveVersion)
 
 				// Workflow Runs
-				workflows.GET("/:id/runs", controllers.ListWorkflowRuns)
 				workflows.GET("/:id/runs/:run_id", controllers.GetWorkflowRun)
 
 				// Schedules
 				workflows.POST("/:id/schedule", controllers.ScheduleWorkflowAPI)
+			}
+
+			// Workflow Runs
+			runs := protected.Group("/runs")
+			runs.Use(middlewares.RoleMiddleware("ADMIN", "EDITOR"))
+			{
+				runs.GET("", controllers.ListWorkflowRuns)
 			}
 
 			// Global Schedules API

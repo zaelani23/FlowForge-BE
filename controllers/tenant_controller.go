@@ -138,6 +138,13 @@ func ListUserTenants(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	offset := (page - 1) * limit
 
+	var totalCount int64
+	database.DB.Table("users").Count(&totalCount)
+	totalPage := 1
+	if limit > 0 {
+		totalPage = int((totalCount + int64(limit) - 1) / int64(limit))
+	}
+
 	var results []UserTenantResult
 	database.DB.Table("users").
 		Select("users.id as user_id, users.email, users.role, tenants.id as tenant_id, tenants.name as tenant_name, users.created_at").
@@ -147,8 +154,36 @@ func ListUserTenants(c *gin.Context) {
 		Scan(&results)
 
 	c.JSON(http.StatusOK, gin.H{
-		"data":  results,
-		"page":  page,
-		"limit": limit,
+		"data":       results,
+		"page":       page,
+		"limit":      limit,
+		"total_page": totalPage,
+	})
+}
+
+func DeleteUser(c *gin.Context) {
+	tenantID, _ := c.Get("tenant_id")
+	userID := c.Param("id")
+
+	var user models.User
+	if err := database.DB.Where("id = ? AND tenant_id = ?", userID, tenantID).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found or does not belong to your tenant"})
+		return
+	}
+
+	// Prevent deleting yourself
+	requestUserID, exists := c.Get("user_id")
+	if exists && requestUserID == user.ID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "You cannot delete your own account"})
+		return
+	}
+
+	if err := database.DB.Delete(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete user"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "User deleted successfully",
 	})
 }

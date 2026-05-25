@@ -72,13 +72,21 @@ func ListWorkflows(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	offset := (page - 1) * limit
 
+	var totalCount int64
+	database.DB.Model(&models.Workflow{}).Where("tenant_id = ?", tenantID).Count(&totalCount)
+	totalPage := 1
+	if limit > 0 {
+		totalPage = int((totalCount + int64(limit) - 1) / int64(limit))
+	}
+
 	var workflows []models.Workflow
 	database.DB.Where("tenant_id = ?", tenantID).Offset(offset).Limit(limit).Find(&workflows)
 
 	c.JSON(http.StatusOK, gin.H{
-		"data":  workflows,
-		"page":  page,
-		"limit": limit,
+		"data":       workflows,
+		"page":       page,
+		"limit":      limit,
+		"total_page": totalPage,
 	})
 }
 
@@ -374,41 +382,44 @@ func GetWorkflowRun(c *gin.Context) {
 
 func ListWorkflowRuns(c *gin.Context) {
 	tenantID, _ := c.Get("tenant_id")
-	workflowID := c.Param("id")
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	offset := (page - 1) * limit
 
-	// Ensure workflow belongs to tenant
-	var workflow models.Workflow
-	if err := database.DB.Where("id = ? AND tenant_id = ?", workflowID, tenantID).First(&workflow).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
-		return
+	var totalCount int64
+	database.DB.Model(&models.WorkflowRun{}).Where("tenant_id = ?", tenantID).Count(&totalCount)
+	totalPage := 1
+	if limit > 0 {
+		totalPage = int((totalCount + int64(limit) - 1) / int64(limit))
 	}
 
-	var runs []models.WorkflowRun
-	database.DB.Where("workflow_id = ?", workflowID).Order("started_at desc").Offset(offset).Limit(limit).Find(&runs)
-
-	var response []map[string]interface{}
-	for _, r := range runs {
-		response = append(response, map[string]interface{}{
-			"id":            r.ID,
-			"tenant_id":     r.TenantID,
-			"workflow_id":   r.WorkflowID,
-			"workflow_name": workflow.Name,
-			"version_id":    r.VersionID,
-			"status":        r.Status,
-			"started_at":    r.StartedAt,
-			"finished_at":   r.FinishedAt,
-			"duration_ms":   r.DurationMs,
-		})
+	type WorkflowRunResult struct {
+		ID           string     `json:"id"`
+		TenantID     string     `json:"tenant_id"`
+		WorkflowID   string     `json:"workflow_id"`
+		WorkflowName string     `json:"workflow_name"`
+		VersionID    string     `json:"version_id"`
+		Status       string     `json:"status"`
+		StartedAt    time.Time  `json:"started_at"`
+		FinishedAt   *time.Time `json:"finished_at"`
+		DurationMs   *int       `json:"duration_ms"`
 	}
+
+	var results []WorkflowRunResult
+	database.DB.Table("workflow_runs").
+		Select("workflow_runs.id, workflow_runs.tenant_id, workflow_runs.workflow_id, workflows.name as workflow_name, workflow_runs.version_id, workflow_runs.status, workflow_runs.started_at, workflow_runs.finished_at, workflow_runs.duration_ms").
+		Joins("left join workflows on workflow_runs.workflow_id = workflows.id").
+		Where("workflow_runs.tenant_id = ?", tenantID).
+		Order("workflow_runs.started_at desc").
+		Offset(offset).Limit(limit).
+		Scan(&results)
 
 	c.JSON(http.StatusOK, gin.H{
-		"data":  response,
-		"page":  page,
-		"limit": limit,
+		"data":       results,
+		"page":       page,
+		"limit":      limit,
+		"total_page": totalPage,
 	})
 }
 
@@ -490,30 +501,38 @@ func ListScheduledWorkflows(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	offset := (page - 1) * limit
 
-	var schedules []models.ScheduledWorkflowExecution
-	database.DB.Where("tenant_id = ?", tenantID).Order("created_at desc").Offset(offset).Limit(limit).Find(&schedules)
-
-	var response []map[string]interface{}
-	for _, s := range schedules {
-		var workflow models.Workflow
-		database.DB.Where("id = ?", s.WorkflowID).First(&workflow)
-
-		response = append(response, map[string]interface{}{
-			"id":                   s.ID,
-			"tenant_id":            s.TenantID,
-			"cron_expression":      s.CronExpr,
-			"workflow_id":          s.WorkflowID,
-			"workflow_name":        workflow.Name,
-			"workflow_description": workflow.Description,
-			"status":               s.Status,
-			"created_at":           s.CreatedAt,
-		})
+	var totalCount int64
+	database.DB.Model(&models.ScheduledWorkflowExecution{}).Where("tenant_id = ?", tenantID).Count(&totalCount)
+	totalPage := 1
+	if limit > 0 {
+		totalPage = int((totalCount + int64(limit) - 1) / int64(limit))
 	}
 
+	type ScheduledWorkflowResult struct {
+		ID                  string    `json:"id"`
+		TenantID            string    `json:"tenant_id"`
+		CronExpr            string    `json:"cron_expression"`
+		WorkflowID          string    `json:"workflow_id"`
+		WorkflowName        string    `json:"workflow_name"`
+		WorkflowDescription string    `json:"workflow_description"`
+		Status              string    `json:"status"`
+		CreatedAt           time.Time `json:"created_at"`
+	}
+
+	var results []ScheduledWorkflowResult
+	database.DB.Table("scheduled_workflow_executions").
+		Select("scheduled_workflow_executions.id, scheduled_workflow_executions.tenant_id, scheduled_workflow_executions.cron_expr, scheduled_workflow_executions.workflow_id, workflows.name as workflow_name, workflows.description as workflow_description, scheduled_workflow_executions.status, scheduled_workflow_executions.created_at").
+		Joins("left join workflows on scheduled_workflow_executions.workflow_id = workflows.id").
+		Where("scheduled_workflow_executions.tenant_id = ?", tenantID).
+		Order("scheduled_workflow_executions.created_at desc").
+		Offset(offset).Limit(limit).
+		Scan(&results)
+
 	c.JSON(http.StatusOK, gin.H{
-		"data":  response,
-		"page":  page,
-		"limit": limit,
+		"data":       results,
+		"page":       page,
+		"limit":      limit,
+		"total_page": totalPage,
 	})
 }
 
