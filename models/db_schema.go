@@ -64,6 +64,7 @@ type ExecutionLog struct {
 	InputData    *string   `gorm:"type:jsonb" json:"input_data"`
 	OutputData   *string   `gorm:"type:jsonb" json:"output_data"`
 	ErrorMessage *string   `gorm:"type:text" json:"error_message"`
+	Logs         *string   `gorm:"type:text" json:"logs"`
 	ExecutedAt   time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"executed_at"`
 	Durations    *int      `json:"durations"`
 }

@@ -112,9 +112,32 @@ func executeStepWithRetry(ctx context.Context, runID string, step models.Workflo
 				"status":  execLog.Status,
 			})
 
+			// Set up logging channel
+			logChan := make(chan string)
+			var wgLog sync.WaitGroup
+			var logBuffer string
+
+			wgLog.Add(1)
+			go func() {
+				defer wgLog.Done()
+				for msg := range logChan {
+					logBuffer += msg + "\n"
+					PublishEvent(fmt.Sprintf("log.%s.%s", runID, step.ID), map[string]interface{}{
+						"run_id":  runID,
+						"step_id": step.ID,
+						"message": msg,
+					})
+				}
+			}()
+
 			// Execute step
 			start := time.Now()
-			output, err := executeStepAction(step)
+			output, err := executeStepAction(step, logChan)
+
+			// Close logChan and wait for log reading to finish
+			close(logChan)
+			wgLog.Wait()
+
 			duration := time.Since(start)
 
 			// Log execution update
@@ -138,6 +161,7 @@ func executeStepWithRetry(ctx context.Context, runID string, step models.Workflo
 				"output_data":   &outStr,
 				"error_message": errStr,
 				"durations":     dr,
+				"logs":          logBuffer,
 			})
 
 			// Publish the updated execLog state
@@ -147,6 +171,7 @@ func executeStepWithRetry(ctx context.Context, runID string, step models.Workflo
 				"status":        status,
 				"duration":      dr,
 				"error_message": errStr,
+				"logs":          logBuffer,
 			})
 
 			if err == nil {
@@ -165,7 +190,15 @@ func executeStepWithRetry(ctx context.Context, runID string, step models.Workflo
 	return fmt.Errorf("step %s failed after %d retries: %v", step.ID, maxRetries, lastErr)
 }
 
-func executeStepAction(step models.WorkflowStep) (map[string]interface{}, error) {
+func executeStepAction(step models.WorkflowStep, logChan chan<- string) (map[string]interface{}, error) {
+	sendLog := func(msg string) {
+		if logChan != nil {
+			logChan <- fmt.Sprintf("[%s] %s", time.Now().Format(time.RFC3339), msg)
+		}
+	}
+
+	sendLog(fmt.Sprintf("Starting execution of step %s (Type: %s)", step.ID, step.Type))
+
 	switch step.Type {
 	case models.HTTPCall:
 		url := step.Config["url"]
@@ -174,44 +207,63 @@ func executeStepAction(step models.WorkflowStep) (map[string]interface{}, error)
 			method = "GET"
 		}
 
+		sendLog(fmt.Sprintf("Preparing HTTP %s request to %s", method, url))
+
 		req, err := http.NewRequest(method, url, nil)
 		if err != nil {
+			sendLog(fmt.Sprintf("Failed to create HTTP request: %v", err))
 			return nil, err
 		}
 
 		client := &http.Client{Timeout: 10 * time.Second}
+		sendLog("Sending request...")
 		resp, err := client.Do(req)
 		if err != nil {
+			sendLog(fmt.Sprintf("HTTP request failed: %v", err))
 			return nil, err
 		}
 		defer resp.Body.Close()
 
 		body, _ := ioutil.ReadAll(resp.Body)
+		sendLog(fmt.Sprintf("Received response with status code %d. Body length: %d bytes", resp.StatusCode, len(body)))
 		return map[string]interface{}{"status_code": resp.StatusCode, "body": string(body)}, nil
 
 	case models.Script:
 		scriptCode := step.Config["code"]
+		sendLog(fmt.Sprintf("Initializing Otto JS VM to run script..."))
+
 		vm := otto.New()
+
+		sendLog("Executing script...")
 		val, err := vm.Run(scriptCode)
 		if err != nil {
+			sendLog(fmt.Sprintf("Script execution failed: %v", err))
 			return nil, err
 		}
 		strVal, _ := val.ToString()
+		sendLog(fmt.Sprintf("Script executed successfully. Result: %s", strVal))
 		return map[string]interface{}{"result": strVal}, nil
 
 	case models.Delay:
 		durationStr := step.Config["duration"] // e.g., "5s"
 		d, err := time.ParseDuration(durationStr)
 		if err != nil {
+			sendLog(fmt.Sprintf("Invalid delay duration format: %v", err))
 			return nil, fmt.Errorf("invalid duration format: %v", err)
 		}
+		sendLog(fmt.Sprintf("Sleeping for %v...", d))
 		time.Sleep(d)
+		sendLog("Woke up from sleep.")
 		return map[string]interface{}{"delayed": durationStr}, nil
 
 	case models.Conditional:
+		sendLog("Evaluating conditional branch...")
 		// Simplified conditional: Just return true for now, in real life evaluate condition
+		sendLog("Condition evaluated to true.")
 		return map[string]interface{}{"branch_taken": true}, nil
 	}
 
-	return nil, fmt.Errorf("unknown step type: %s", step.Type)
+	errMsg := fmt.Sprintf("Unknown step type: %s", step.Type)
+	sendLog(errMsg)
+	return nil, fmt.Errorf(errMsg)
 }

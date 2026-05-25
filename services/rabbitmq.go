@@ -14,6 +14,7 @@ var (
 )
 
 const ExchangeName = "workflow_events"
+const MessageExpiration = "3600000"
 
 func InitRabbitMQ() {
 	url := os.Getenv("RABBITMQ_URL")
@@ -71,6 +72,7 @@ func PublishEvent(routingKey string, payload interface{}) {
 		amqp.Publishing{
 			ContentType: "application/json",
 			Body:        body,
+			Expiration:  MessageExpiration,
 		})
 	if err != nil {
 		log.Printf("Failed to publish a message: %v", err)

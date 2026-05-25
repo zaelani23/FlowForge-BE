@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -325,11 +326,13 @@ func GetWorkflowRun(c *gin.Context) {
 		var executedAt interface{} = nil
 		var durations *int
 		var errorMsg *string
+		var logsStr *string
 
 		if l, ok := logMap[step.ID]; ok {
 			stepStatus = l.Status
 			executedAt = l.ExecutedAt
 			durations = l.Durations
+			logsStr = l.Logs
 			if l.Status == "FAILED" {
 				errorMsg = l.ErrorMessage
 			}
@@ -345,6 +348,7 @@ func GetWorkflowRun(c *gin.Context) {
 			"executed_at":   executedAt,
 			"durations":     durations,
 			"error_message": errorMsg,
+			"logs":          logsStr,
 		})
 	}
 
@@ -511,29 +515,11 @@ func GetWorkflowRunWebSocket(c *gin.Context) {
 	tenantID, _ := c.Get("tenant_id")
 	runID := c.Param("run_id")
 	var run models.WorkflowRun
-	var workflow models.Workflow
-	var version models.WorkflowVersion
-	var def models.WorkflowDefinition
 
 	if err := database.DB.Where("id = ? AND tenant_id = ?", runID, tenantID).First(&run).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow run not found"})
 		return
 	}
-	if err := database.DB.Where("id = ?", run.WorkflowID).First(&workflow).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Workflow data missing"})
-		return
-	}
-	if err := database.DB.Where("id = ?", run.VersionID).First(&version).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Version data missing"})
-		return
-	}
-	if err := json.Unmarshal([]byte(version.Definition), &def); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid definition format"})
-		return
-	}
-
-	var logs []models.ExecutionLog
-	database.DB.Where("run_id = ?", runID).Order("executed_at asc").Find(&logs)
 
 	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
@@ -579,78 +565,9 @@ func GetWorkflowRunWebSocket(c *gin.Context) {
 				return
 			}
 
-			logMap := make(map[string]models.ExecutionLog)
-			for _, l := range logs {
-				logMap[l.StepID] = l
-			}
-
-			var stepsWithStatus []map[string]interface{}
-			for _, step := range def.Steps {
-				stepStatus := "NOT STARTED"
-				var executedAt interface{} = nil
-				var durations *int
-				var errorMsg *string
-
-				if l, ok := logMap[step.ID]; ok {
-					stepStatus = l.Status
-					executedAt = l.ExecutedAt
-					durations = l.Durations
-					if l.Status == "FAILED" {
-						errorMsg = l.ErrorMessage
-					}
-				}
-
-				messageBody := make(map[string]interface{})
-				_ = json.Unmarshal(msg.Body, &messageBody)
-				if v1, ok1 := messageBody["type"].(string); ok1 && v1 == "step_status" {
-					if v2, ok2 := messageBody["step_id"].(string); ok2 && v2 == step.ID {
-						stepStatus, _ = messageBody["status"].(string)
-						executedAt, _ = messageBody["started_at"].(time.Time)
-						durations, _ = messageBody["duration"].(*int)
-						errorMsg, _ = messageBody["error_message"].(*string)
-					}
-				}
-
-				stepsWithStatus = append(stepsWithStatus, map[string]interface{}{
-					"id":            step.ID,
-					"description":   step.Description,
-					"type":          step.Type,
-					"config":        step.Config,
-					"depends_on":    step.DependsOn,
-					"status":        stepStatus,
-					"executed_at":   executedAt,
-					"durations":     durations,
-					"error_message": errorMsg,
-				})
-			}
-
-			defMap := map[string]interface{}{
-				"id":    def.ID,
-				"steps": stepsWithStatus,
-			}
-
-			runStatus := run.Status
-			runStartedAt := run.StartedAt
-			runFinishedAt := run.FinishedAt
-			runDurationMs := run.DurationMs
 			messageBody := make(map[string]interface{})
-			_ = json.Unmarshal(msg.Body, &messageBody)
-			if v1, ok1 := messageBody["type"].(string); ok1 && v1 == "workflow_status" {
-				runStatus, _ = messageBody["status"].(string)
-				runStartedAt, _ = messageBody["started_at"].(time.Time)
-				runFinishedAt, _ = messageBody["finished_at"].(*time.Time)
-				runDurationMs, _ = messageBody["duration_ms"].(*int)
-			}
-
-			if err := ws.WriteJSON(map[string]interface{}{
-				"run_id":      run.ID,
-				"status":      runStatus,
-				"started_at":  runStartedAt,
-				"finished_at": runFinishedAt,
-				"duration_ms": runDurationMs,
-				"workflow":    workflow,
-				"definition":  defMap,
-			}); err != nil {
+			json.Unmarshal(msg.Body, &messageBody)
+			if err := ws.WriteJSON(messageBody); err != nil {
 				return
 			}
 
@@ -661,6 +578,75 @@ func GetWorkflowRunWebSocket(c *gin.Context) {
 
 		case <-done:
 			return // Exit if read goroutine exits (client disconnected)
+		}
+	}
+}
+
+func GetStepLogWebSocket(c *gin.Context) {
+	runID := c.Param("run_id")
+	stepID := c.Param("step_id")
+
+	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		return
+	}
+
+	// Subscribe to RabbitMQ specific to this step's logs
+	routingKey := fmt.Sprintf("log.%s.%s", runID, stepID)
+	msgs, cleanup, err := services.SubscribeEvents(routingKey)
+	if err != nil {
+		ws.Close()
+		return
+	}
+
+	done := make(chan struct{})
+
+	// Read Goroutine (Ping/Pong & detect disconnect)
+	go func() {
+		defer func() {
+			ws.Close()
+			if cleanup != nil {
+				cleanup() // Delete AMQP queue
+			}
+			close(done)
+		}()
+		ws.SetReadDeadline(time.Now().Add(pongWait))
+		ws.SetPongHandler(func(string) error { ws.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+		for {
+			_, _, err := ws.ReadMessage()
+			if err != nil {
+				break
+			}
+		}
+	}()
+
+	// Write Goroutine (Pub/Sub Consumer)
+	ticker := time.NewTicker(pingPeriod)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case msg, ok := <-msgs:
+			if !ok {
+				return
+			}
+
+			var payload map[string]interface{}
+			if err := json.Unmarshal(msg.Body, &payload); err == nil {
+				if logMsg, ok := payload["message"].(string); ok {
+					if err := ws.WriteMessage(websocket.TextMessage, []byte(logMsg)); err != nil {
+						return
+					}
+				}
+			}
+
+		case <-ticker.C:
+			if err := ws.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
+				return
+			}
+
+		case <-done:
+			return
 		}
 	}
 }
