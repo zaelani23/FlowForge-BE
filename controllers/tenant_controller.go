@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"net/http"
+	"strconv"
 
 	"workflow-engine/database"
 	"workflow-engine/models"
@@ -120,5 +121,34 @@ func RegisterUser(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "User created successfully",
 		"user_id": user.ID,
+	})
+}
+
+type UserTenantResult struct {
+	UserID     string `json:"user_id"`
+	Email      string `json:"email"`
+	Role       string `json:"role"`
+	TenantID   string `json:"tenant_id"`
+	TenantName string `json:"tenant_name"`
+	CreatedAt  string `json:"created_at"`
+}
+
+func ListUserTenants(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	offset := (page - 1) * limit
+
+	var results []UserTenantResult
+	database.DB.Table("users").
+		Select("users.id as user_id, users.email, users.role, tenants.id as tenant_id, tenants.name as tenant_name, users.created_at").
+		Joins("left join tenants on users.tenant_id = tenants.id").
+		Order("users.created_at desc").
+		Offset(offset).Limit(limit).
+		Scan(&results)
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  results,
+		"page":  page,
+		"limit": limit,
 	})
 }

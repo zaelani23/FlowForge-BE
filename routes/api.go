@@ -46,6 +46,7 @@ func SetupRouter() *gin.Engine {
 			users.Use(middlewares.RoleMiddleware("ADMIN"))
 			{
 				users.POST("/register", controllers.RegisterUser)
+				users.GET("/tenants", controllers.ListUserTenants)
 			}
 
 			// Workflow CRUD (Admins & Editors)

@@ -149,8 +149,12 @@ func UpdateWorkflow(c *gin.Context) {
 		return
 	}
 
-	// Increment version
-	newVersionNumber := workflow.CurrentVersion + 1
+	// Find max version to increment
+	var maxVersion models.WorkflowVersion
+	newVersionNumber := 1
+	if err := tx.Where("workflow_id = ?", workflowID).Order("version desc").First(&maxVersion).Error; err == nil {
+		newVersionNumber = maxVersion.Version + 1
+	}
 
 	// Save new version
 	defJSON, _ := json.Marshal(req.Definition)
@@ -372,6 +376,10 @@ func ListWorkflowRuns(c *gin.Context) {
 	tenantID, _ := c.Get("tenant_id")
 	workflowID := c.Param("id")
 
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	offset := (page - 1) * limit
+
 	// Ensure workflow belongs to tenant
 	var workflow models.Workflow
 	if err := database.DB.Where("id = ? AND tenant_id = ?", workflowID, tenantID).First(&workflow).Error; err != nil {
@@ -380,7 +388,7 @@ func ListWorkflowRuns(c *gin.Context) {
 	}
 
 	var runs []models.WorkflowRun
-	database.DB.Where("workflow_id = ?", workflowID).Order("started_at desc").Find(&runs)
+	database.DB.Where("workflow_id = ?", workflowID).Order("started_at desc").Offset(offset).Limit(limit).Find(&runs)
 
 	var response []map[string]interface{}
 	for _, r := range runs {
@@ -398,7 +406,9 @@ func ListWorkflowRuns(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"data": response,
+		"data":  response,
+		"page":  page,
+		"limit": limit,
 	})
 }
 
